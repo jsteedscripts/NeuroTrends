@@ -1,0 +1,1 @@
+NeuroTrends is a RShiny app that uses Google trends tiem series data to analyze Google search interest in Neuromorphic Computing over the years. The app is live at https://juliasteed.shinyapps.io/NeuroInterest/.
