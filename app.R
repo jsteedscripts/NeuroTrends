@@ -3,8 +3,12 @@ library(plotly)
 library(shiny)
 library(ggplot2)
 library(shinythemes)
+library(urca)
 
 # Load data
+# file_path <- '../../Projects/NeuroInterest/multiTimeline.csv'
+# ml_path <- '../../Projects/NeuroInterest/MLdata.csv'
+# ai_path <- '../../Projects/NeuroInterest/AIdata.csv'
 file_path <- 'multiTimeline.csv'
 ml_path <- 'MLdata.csv'
 ai_path <- 'AIdata.csv'
@@ -42,6 +46,13 @@ ai$Interest <- as.numeric(
   ifelse(ai$Interest == "<1", 0, ai$Interest)
 )
 
+# fit <- neuro %>% 
+#   model(NAIVE(Interest ~ drift()))
+# 
+# fit %>% 
+#   forecast(h=12) %>% 
+#   autoplot(neuro, level=NULL)
+
 ui <- fluidPage(theme = shinytheme("superhero"),
 
   # title and instructions
@@ -59,7 +70,7 @@ ui <- fluidPage(theme = shinytheme("superhero"),
             </ul>
        </div>"
   ),
-  
+
   checkboxInput("overlay_ml", "Overlay Machine Learning Interest", value = FALSE),
   checkboxInput("overlay_ai", "Overlay Artificial Intelligence Interest", value = FALSE),
 
@@ -87,7 +98,7 @@ ui <- fluidPage(theme = shinytheme("superhero"),
       radioButtons(
         inputId = "selectPlot",
         label = "Choose a Plot",
-        choices = c("Seasonality", "Autocorrelation", "Decomposition"),
+        choices = c("Seasonality", "Autocorrelation", "Decomposition", "Forecasting"),
         selected = "Seasonality"
       ),
       conditionalPanel(
@@ -112,6 +123,14 @@ ui <- fluidPage(theme = shinytheme("superhero"),
           inputId = "decompositionOption",
           label = "Choose a Type of Decomposition",
           choices = c("Classical (Additive)", "Classical (Multiplicative)", "STL")
+        )
+      ),
+      conditionalPanel(
+        condition = "input.selectPlot == 'Forecasting'",
+        selectInput(
+          inputId = "forecastingOption",
+          label = "Choose a Forecasting Model",
+          choices = c("Drift","TSLM", "ETS", "ARIMA")
         )
       ),
       conditionalPanel(
@@ -144,7 +163,11 @@ ui <- fluidPage(theme = shinytheme("superhero"),
       conditionalPanel(
         condition = "input.selectPlot == 'Decomposition'",
         plotOutput("decompPlot"),
-      # additional feature
+      ),
+      # forecasting plot
+      conditionalPanel(
+        condition = "input.selectPlot == 'Forecasting'",
+        plotOutput("forecastPlot"),
       )
     )
   )
@@ -157,7 +180,7 @@ server <- function(input, output, session) {
     neuro$Month <- as.Date(neuro$Month)
     ml$Month <- as.Date(ml$Month)
     ai$Month <- as.Date(ai$Month)
-    
+
     plot_data <- neuro
     if (input$overlay_ml) {
       plot_data <- merge(plot_data, ml, by = "Month", all = TRUE)
@@ -166,7 +189,7 @@ server <- function(input, output, session) {
       plot_data <- merge(plot_data, ai, by = "Month", all = TRUE)
     }
     plot_data <- na.omit(plot_data)
-    
+
     p <- plot_ly(plot_data, x = ~Month)
     if (input$overlay_ml) {
       p <- p %>% add_lines(y = ~ml$Interest, color = I("orange"), name = "Machine Learning")
@@ -177,7 +200,7 @@ server <- function(input, output, session) {
     p <- p %>% add_lines(y = ~neuro$Interest, color = I("blue"), name = "Neuromorphic Computing") %>%
       layout(title = "Neuromorphic Computing Google Search Interest Over Time", xaxis = list(title = "Month"), yaxis = list(title = "Interest"),
              margin = list(l = 50, r = 50, b = 100, t = 100))
-    
+
     m <- neuro[which(neuro$Month == yearmonth("2018 Feb")), ]
     m2 <- neuro[which(neuro$Month == yearmonth("2013 Dec")), ]
     m3 <- neuro[which(neuro$Month == yearmonth("2014 May")), ]
@@ -187,29 +210,29 @@ server <- function(input, output, session) {
 
     a <- list(x = m$Month, y = m$Interest, text = "Intel Loihi",
       xref = "x", yref = "y", showarrow = TRUE, arrowhead = 7, ax = 20, ay = -40)
-    
+
     a2 <- list(x = m2$Month, y = m2$Interest, text = "Markham's MBP",
               xref = "x", yref = "y", showarrow = TRUE, arrowhead = 7, ax = 20, ay = -40)
-    
+
     a3 <- list(x = m3$Month, y = m3$Interest, text = "IBM TrueNorth",
                xref = "x", yref = "y", showarrow = TRUE, arrowhead = 7, ax = 50, ay = -70)
-    
+
     a4 <- list(x = m4$Month, y = m4$Interest, text = "Google Brain",
                xref = "x", yref = "y", showarrow = TRUE, arrowhead = 7, ax = 50, ay = -70)
-    
+
     a5 <- list(x = m5$Month, y = m5$Interest, text = "Hinton puslishes “A Fast Learning Algorithm for Deep Belief Nets”",
                xref = "x", yref = "y", showarrow = TRUE, arrowhead = 7, ax = 50, ay = -70)
-    
+
     annot = list(a, a2, a3, a4, a5)
-    
+
     if (input$overlay_ai) {
       a6 <- list(x = m6$Month, y = m6$Interest, text = "ChatGPT",
                  xref = "x", yref = "y", showarrow = TRUE, arrowhead = 7, ax = 50, ay = -70)
       annot = list(a, a2, a3, a4, a5, a6)
     }
-    
+
     p <- p %>% layout(annotations = annot)
-    
+
     p
   })
 
@@ -259,6 +282,33 @@ server <- function(input, output, session) {
         autoplot(season_adjust)
     }
   })
+  # forecasting plot
+  output$forecastPlot <- renderPlot({
+    req(input$selectPlot == "Forecasting")
+    lambda <- guerrero(neuro$Interest, .period = 12)
+    if (input$forecastingOption == "Drift") {
+      neuro %>%
+        model(NAIVE(box_cox(Interest, lambda) ~ drift())) %>% 
+        forecast(h=36) %>%
+        autoplot(neuro, level=NULL)
+    } else if (input$forecastingOption == "TSLM") {
+      neuro %>%
+        model(TSLM(box_cox(Interest, lambda) ~ trend() + season())) %>% 
+        forecast(h=36) %>%
+        autoplot(neuro, level=NULL)
+    } else if (input$forecastingOption == "ETS") {
+      neuro %>%
+        model(ETS(box_cox(Interest, lambda))) %>% 
+        forecast(h=36) %>%
+        autoplot(neuro, level=NULL)
+    } else if (input$forecastingOption == "ARIMA") {
+      neuro %>%
+        model(ARIMA(box_cox(Interest, lambda))) %>% 
+        forecast(h=36) %>%
+        autoplot(neuro, level=NULL)
+    }
+  })
+
 
   # explanation corresponding to selected plot
   output$interpretation <- renderText({
@@ -322,6 +372,10 @@ server <- function(input, output, session) {
         that this data has virtually no sesasonality, because the correlation is not alternating between positive and negative.
         You can adjust the number of years to display using the button above."
       }
+    } else if (input$selectPlot == "Forecasting") {
+      "For this series, the drift forecasting model would be the best. It appears to follow the trend of the data best and is the
+      most plausible model. Given the growing interest in artificial intelligence and machine learning, it is reasonable to assume
+      that interest in a related field/ sub-field of AI and ML, such as neuromorphic computing, would also grow."
     } else {
       "Choose a plot to see interpretation."
     }
